@@ -6,12 +6,19 @@ from gymnasium import spaces
 class MinesweeperEnv(gym.Env):
     metadata = {"render_modes": ["human", "ansi"], "render_fps": 4}
 
-    def __init__(self, width=9, height=9, num_mines=10, render_mode=None):
+    def __init__(self, width=9, height=9, num_mines=10, render_mode=None,
+                 reward_win=10.0, reward_lose=-10.0, reward_reveal=0.3,
+                 reward_flag=0.0, reward_invalid=-0.5):
         super().__init__()
         self.width = width
         self.height = height
         self.num_mines = num_mines
         self.render_mode = render_mode
+        self.reward_win = reward_win
+        self.reward_lose = reward_lose
+        self.reward_reveal = reward_reveal
+        self.reward_flag = reward_flag
+        self.reward_invalid = reward_invalid
 
         # 162 个离散动作: 81 个位置 × 2 种操作 (翻开 / 标旗)
         self.action_space = spaces.Discrete(width * height * 2)
@@ -47,9 +54,9 @@ class MinesweeperEnv(gym.Env):
 
         # action_type == 0: 翻开
         if self.revealed[row, col]:
-            return self._get_obs(), -0.5, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, False, {}
         if self.flagged[row, col]:
-            return self._get_obs(), -0.5, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, False, {}
 
         if self.first_click:
             self._place_mines(safe_row=row, safe_col=col)
@@ -57,21 +64,21 @@ class MinesweeperEnv(gym.Env):
 
         if self.mine_grid[row, col] == -1:
             self.revealed[row, col] = True
-            return self._get_obs(), -10.0, True, False, {}
+            return self._get_obs(), self.reward_lose, True, False, {}
 
         self._flood_fill(row, col)
 
         all_safe_revealed = np.all(self.revealed | (self.mine_grid == -1))
         if all_safe_revealed:
-            return self._get_obs(), 10.0, True, True, {}
+            return self._get_obs(), self.reward_win, True, True, {}
 
-        return self._get_obs(), 0.3, False, False, {}
+        return self._get_obs(), self.reward_reveal, False, False, {}
 
     def _handle_flag(self, row, col):
         if self.revealed[row, col]:
-            return self._get_obs(), -0.5, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, False, {}
         self.flagged[row, col] = not self.flagged[row, col]
-        return self._get_obs(), 0.0, False, False, {}
+        return self._get_obs(), self.reward_flag, False, False, {}
 
     # ---------- 核心逻辑 ----------
 
