@@ -23,10 +23,11 @@ class MinesweeperEnv(gym.Env):
         # 162 个离散动作: 81 个位置 × 2 种操作 (翻开 / 标旗)
         self.action_space = spaces.Discrete(width * height * 2)
 
-        # 状态: 3 通道 × height × width, 值域 [0, 8]
+        # 状态: 单通道 height × width, 值域 [-2, 8]
+        #   -1=旗, 0=未翻开, 1~8=数字, -2=踩中雷
         self.observation_space = spaces.Box(
-            low=0, high=8,
-            shape=(3, height, width),
+            low=-2, high=8,
+            shape=(height, width),
             dtype=np.int8
         )
 
@@ -126,12 +127,16 @@ class MinesweeperEnv(gym.Env):
     # ---------- 观测 ----------
 
     def _get_obs(self):
-        obs = np.zeros((3, self.height, self.width), dtype=np.int8)
-        revealed_vals = np.where(self.revealed, self.mine_grid, 0)
-        revealed_vals = np.clip(revealed_vals, 0, 8)
-        obs[0] = revealed_vals
-        obs[1] = self.flagged.astype(np.int8)
-        obs[2] = (~self.revealed & ~self.flagged).astype(np.int8)
+        obs = np.zeros((self.height, self.width), dtype=np.int8)
+        # 已翻开的安全格 → 数字 1~8
+        safe_revealed = self.revealed & (self.mine_grid != -1)
+        obs[safe_revealed] = self.mine_grid[safe_revealed]
+        # 已翻开的雷 → -2
+        mine_revealed = self.revealed & (self.mine_grid == -1)
+        obs[mine_revealed] = -2
+        # 标旗（未翻开的） → -1
+        obs[self.flagged & ~self.revealed] = -1
+        # 未翻未标 → 保持 0
         return obs
 
     # ---------- 渲染 ----------
