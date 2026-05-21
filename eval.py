@@ -3,6 +3,7 @@ import argparse
 import os
 import torch
 from datetime import datetime
+from action_mask import apply_action_mask
 from minesweeper_env import MinesweeperEnv
 from ppo_network import ActorCritic
 
@@ -45,7 +46,9 @@ def main():
             t = torch.tensor(s, dtype=torch.float32, device=device)
             with torch.no_grad():
                 logits, _ = policy(t)
-            a = torch.argmax(logits, dim=-1).item()
+                mask = torch.tensor(env.action_mask(), dtype=torch.bool, device=device)
+                masked_logits = apply_action_mask(logits, mask)
+            a = torch.argmax(masked_logits, dim=-1).item()
 
             s, r, terminated, truncated, info = env.step(a)
             done = terminated or truncated
