@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -184,8 +185,9 @@ if __name__ == "__main__":
 
     train(env, policy, optimizer, cfg, device)
 
-    torch.save(policy.state_dict(), "ppo_minesweeper.pth")
-    print("saved ppo_minesweeper.pth")
+    os.makedirs("exp", exist_ok=True)
+    torch.save(policy.state_dict(), "exp/ppo_minesweeper.pth")
+    print("saved exp/ppo_minesweeper.pth")
 
     if cfg.use_wandb:
         wandb.finish()
