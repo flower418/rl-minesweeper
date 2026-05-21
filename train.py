@@ -40,8 +40,9 @@ class PPOConfig:
     reward_lose: float = -20.0
     reward_reveal: float = 5.0
     reward_flag_toggle: float = -0.02
-    reward_flag_right: float = 2 
+    reward_flag_right: float = 2
     reward_flag_wrong: float = -2
+    reward_flag_retoggle: float = -2.0
     reward_invalid: float = -1.0
 
     # ---- wandb ----
@@ -184,7 +185,7 @@ def train(env, policy, optimizer, cfg, device, exp_dir=None):
             "value_loss": v_loss,
         }, step=epoch)
 
-        if epoch % 10 == 0:
+        if epoch % 50 == 0:
             log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
                 f"| eps: {len(ep_rewards):3d} "
                 f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
@@ -220,6 +221,7 @@ if __name__ == "__main__":
         reward_flag_toggle=cfg.reward_flag_toggle,
         reward_flag_right=cfg.reward_flag_right,
         reward_flag_wrong=cfg.reward_flag_wrong,
+        reward_flag_retoggle=cfg.reward_flag_retoggle,
         reward_invalid=cfg.reward_invalid,
     )
     policy = ActorCritic().to(device)

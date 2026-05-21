@@ -47,7 +47,7 @@ def main():
                 logits, _ = policy(t)
             a = torch.argmax(logits, dim=-1).item()
 
-            s, r, terminated, truncated, _ = env.step(a)
+            s, r, terminated, truncated, info = env.step(a)
             done = terminated or truncated
             total_r += r
             step += 1
@@ -57,7 +57,7 @@ def main():
             lines.append(f"step {step:3d}  {act}({pos//9},{pos%9})  r={r:+.1f}")
             lines.append(env.render())
 
-        if total_r > 0:
+        if info.get("is_win", False):
             lines.append("WIN")
             wins += 1
         else:

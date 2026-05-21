@@ -32,7 +32,7 @@ while True:
     print(f"reward: {reward}")
     if terminated:
         print(env.render())
-        print("你赢了!" if reward > 0 else "踩雷了!")
+        print("你赢了!" if info.get("is_win", False) else "踩雷了!")
         break
 
 env.close()

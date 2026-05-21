@@ -10,7 +10,8 @@ class MinesweeperEnv(gym.Env):
                  render_mode=None,
                  reward_win=10.0, reward_lose=-10.0, reward_reveal=0.3,
                  reward_flag_toggle=-0.02, reward_flag_right=0.5,
-                 reward_flag_wrong=-0.5, reward_invalid=-0.5):
+                 reward_flag_wrong=-0.5, reward_flag_retoggle=-2.0,
+                 reward_invalid=-0.5):
         super().__init__()
         self.width = width
         self.height = height
@@ -23,8 +24,10 @@ class MinesweeperEnv(gym.Env):
         self.reward_flag_toggle = reward_flag_toggle
         self.reward_flag_right = reward_flag_right
         self.reward_flag_wrong = reward_flag_wrong
+        self.reward_flag_retoggle = reward_flag_retoggle
         self.reward_invalid = reward_invalid
         self.step_count = 0
+        self._last_flag_pos = None  # (row, col) of previous flag action
 
         # 162 个离散动作: 81 个位置 × 2 种操作 (翻开 / 标旗)
         self.action_space = spaces.Discrete(width * height * 2)
@@ -50,6 +53,7 @@ class MinesweeperEnv(gym.Env):
         self.flagged = np.zeros((self.height, self.width), dtype=bool)
         self.first_click = True
         self.step_count = 0
+        self._last_flag_pos = None
         return self._get_obs(), {}
 
     def step(self, action):
@@ -75,13 +79,13 @@ class MinesweeperEnv(gym.Env):
 
         if self.mine_grid[row, col] == -1:
             self.revealed[row, col] = True
-            return self._get_obs(), self.reward_lose, True, truncated, {}
+            return self._get_obs(), self.reward_lose, True, truncated, {"is_win": False}
 
         self._flood_fill(row, col)
 
         all_safe_revealed = np.all(self.revealed | (self.mine_grid == -1))
         if all_safe_revealed:
-            return self._get_obs(), self.reward_win, True, truncated, {}
+            return self._get_obs(), self.reward_win, True, truncated, {"is_win": True}
 
         return self._get_obs(), self.reward_reveal, False, truncated, {}
 
@@ -89,20 +93,23 @@ class MinesweeperEnv(gym.Env):
         if self.revealed[row, col]:
             return self._get_obs(), self.reward_invalid, False, truncated, {}
 
-        toggling_on = not self.flagged[row, col]  # 即将插旗
+        toggling_on = not self.flagged[row, col]
         self.flagged[row, col] = toggling_on
 
+        # 重复标旗同一格 → 额外惩罚
+        retoggle = self._last_flag_pos == (row, col)
+        extra = self.reward_flag_retoggle if retoggle else 0.0
+        self._last_flag_pos = (row, col)
+
         if self.first_click:
-            # 雷还没埋，不知道对不对，给 toggle reward
-            return self._get_obs(), self.reward_flag_toggle, False, truncated, {}
+            return self._get_obs(), self.reward_flag_toggle + extra, False, truncated, {}
 
         if toggling_on:
             r = self.reward_flag_right if self.mine_grid[row, col] == -1 else self.reward_flag_wrong
         else:
-            # 取消旗：撤销之前的奖励
             r = self.reward_flag_wrong if self.mine_grid[row, col] == -1 else self.reward_flag_right
 
-        return self._get_obs(), r + self.reward_flag_toggle, False, truncated, {}
+        return self._get_obs(), r + self.reward_flag_toggle + extra, False, truncated, {}
 
     # ---------- 核心逻辑 ----------
 
