@@ -1,4 +1,4 @@
-"""加载模型推理，输出胜率，详细过程写入日志。"""
+"""加载 checkpoint 推理，输出胜率，详细过程写入日志。"""
 import argparse
 import os
 import torch
@@ -9,7 +9,7 @@ from ppo_network import ActorCritic
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="exp/test/checkpoint_final.pth")
+    parser.add_argument("--checkpoint", type=str, required=True, help="path to checkpoint.pth")
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--logdir", type=str, default="eval")
     args = parser.parse_args()
@@ -18,13 +18,13 @@ def main():
     log_path = os.path.join(args.logdir, f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
     with open(log_path, "w") as f:
-        f.write(f"model: {args.model}\n")
+        f.write(f"checkpoint: {args.checkpoint}\n")
         f.write(f"games: {args.games}\n\n")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     policy = ActorCritic()
-    policy.load_state_dict(torch.load(args.model, map_location=device))
+    policy.load_state_dict(torch.load(args.checkpoint, map_location=device))
     policy.to(device)
     policy.eval()
 

@@ -42,12 +42,12 @@ class PPOConfig:
     reward_flag_toggle: float = -0.02
     reward_flag_right: float = 2 
     reward_flag_wrong: float = -2
-    reward_invalid: float = -0.1
+    reward_invalid: float = -1.0
 
     # ---- wandb ----
     use_wandb: bool = True
     wandb_project: str = "rl-minesweeper"
-    wandb_name: str = "test"
+    wandb_name: str = "Test1"
 
 
 # ============================================================
@@ -205,6 +205,9 @@ if __name__ == "__main__":
     if cfg.use_wandb:
         wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
 
+    exp_dir = os.path.join("exp", cfg.wandb_name)
+    os.makedirs(exp_dir, exist_ok=True)
+
     env = MinesweeperEnv(
         width=cfg.board_size, height=cfg.board_size,
         num_mines=cfg.num_mines, max_steps=cfg.max_steps,
@@ -218,11 +221,11 @@ if __name__ == "__main__":
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
 
-    train(env, policy, optimizer, cfg, device)
+    train(env, policy, optimizer, cfg, device, exp_dir)
 
-    os.makedirs("exp", exist_ok=True)
-    torch.save(policy.state_dict(), "exp/ppo_minesweeper.pth")
-    print("saved exp/ppo_minesweeper.pth")
+    final_path = os.path.join(exp_dir, "checkpoint.pth")
+    torch.save(policy.state_dict(), final_path)
+    print(f"saved {final_path}")
 
     if cfg.use_wandb:
         wandb.finish()
