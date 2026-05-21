@@ -1,9 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
+
+import wandb
+
 from minesweeper_env import MinesweeperEnv
 from ppo_network import ActorCritic
 
@@ -23,6 +26,9 @@ class PPOConfig:
     update_epochs: int = 4
     steps_per_epoch: int = 256
     num_epochs: int = 500
+    use_wandb: bool = True
+    wandb_project: str = "rl-minesweeper"
+    wandb_name: str = "ppo-baseline"
 
 
 # ============================================================
@@ -143,10 +149,22 @@ def train(env, policy, optimizer, cfg, device):
             policy, optimizer, cfg, states, actions, rewards, dones, old_lp, values
         )
 
+        avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
+        wins = sum(1 for r in ep_rewards if r > 0)
+
+        if cfg.use_wandb:
+            wandb.log({
+                "avg_reward": avg_r,
+                "wins": wins,
+                "episodes": len(ep_rewards),
+                "policy_loss": p_loss,
+                "value_loss": v_loss,
+            }, step=epoch)
+
         if epoch % 10 == 0:
-            avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
             print(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
-                  f"| eps: {len(ep_rewards):3d} | p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
+                  f"| wins: {wins} | eps: {len(ep_rewards):3d} "
+                  f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
 
 
 # ============================================================
@@ -157,6 +175,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = PPOConfig()
 
+    if cfg.use_wandb:
+        wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
+
     env = MinesweeperEnv()
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
@@ -165,3 +186,6 @@ if __name__ == "__main__":
 
     torch.save(policy.state_dict(), "ppo_minesweeper.pth")
     print("saved ppo_minesweeper.pth")
+
+    if cfg.use_wandb:
+        wandb.finish()
