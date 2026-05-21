@@ -37,4 +37,4 @@ class ActorCritic(nn.Module):
         actions = self.actor(x) # (batch, num_actions)
         value = self.critic(x) # (batch, 1)
 
-        return actions, value
+        return logits, value
