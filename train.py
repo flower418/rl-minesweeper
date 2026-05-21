@@ -28,7 +28,7 @@ class PPOConfig:
     entropy_coef: float = 0.01
     update_epochs: int = 4
     steps_per_epoch: int = 256
-    num_epochs: int = 1000
+    num_epochs: int = 2000
 
     # ---- 环境 ----
     board_size: int = 9
@@ -159,18 +159,7 @@ def ppo_update(policy, optimizer, cfg, states, actions, rewards, dones,
 #  Train
 # ============================================================
 
-def train(env, policy, optimizer, cfg, device, exp_dir=None):
-    if exp_dir:
-        os.makedirs(exp_dir, exist_ok=True)
-        log_path = os.path.join(exp_dir, "train.log")
-        log_file = open(log_path, "w")
-
-    def log(msg):
-        print(msg)
-        if exp_dir:
-            log_file.write(msg + "\n")
-            log_file.flush()
-
+def train(env, policy, optimizer, cfg, device):
     for epoch in range(cfg.num_epochs):
         states, actions, rewards, dones, old_lp, values, ep_rewards = rollout(
             env, policy, device, cfg.steps_per_epoch
@@ -191,13 +180,10 @@ def train(env, policy, optimizer, cfg, device, exp_dir=None):
                 "value_loss": v_loss,
             }, step=epoch)
 
-        if epoch % 10 == 0:
-            log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
-                f"| wins: {wins} | eps: {len(ep_rewards):3d} "
-                f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
-
-    if exp_dir:
-        log_file.close()
+        if epoch % 50 == 0:
+            print(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
+                  f"| wins: {wins} | eps: {len(ep_rewards):3d} "
+                  f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
 
 
 # ============================================================
@@ -221,9 +207,6 @@ if __name__ == "__main__":
     if cfg.use_wandb:
         wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
 
-    exp_dir = os.path.join("exp", cfg.wandb_name)
-    os.makedirs(exp_dir, exist_ok=True)
-
     env = MinesweeperEnv(
         width=cfg.board_size, height=cfg.board_size,
         num_mines=cfg.num_mines, max_steps=cfg.max_steps,
@@ -237,12 +220,11 @@ if __name__ == "__main__":
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
 
-    train(env, policy, optimizer, cfg, device, exp_dir)
+    train(env, policy, optimizer, cfg, device)
 
-    # 保存最终模型
-    final_path = os.path.join(exp_dir, "checkpoint_final.pth")
-    torch.save(policy.state_dict(), final_path)
-    print(f"saved {final_path}")
+    os.makedirs("exp", exist_ok=True)
+    torch.save(policy.state_dict(), "exp/ppo_minesweeper.pth")
+    print("saved exp/ppo_minesweeper.pth")
 
     if cfg.use_wandb:
         wandb.finish()
