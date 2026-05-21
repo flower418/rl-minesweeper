@@ -6,19 +6,25 @@ from gymnasium import spaces
 class MinesweeperEnv(gym.Env):
     metadata = {"render_modes": ["human", "ansi"], "render_fps": 4}
 
-    def __init__(self, width=9, height=9, num_mines=10, render_mode=None,
+    def __init__(self, width=9, height=9, num_mines=10, max_steps=200,
+                 render_mode=None,
                  reward_win=10.0, reward_lose=-10.0, reward_reveal=0.3,
-                 reward_flag=0.0, reward_invalid=-0.5):
+                 reward_flag_toggle=0.0, reward_flag_right=0.5,
+                 reward_flag_wrong=-0.5, reward_invalid=-0.5):
         super().__init__()
         self.width = width
         self.height = height
         self.num_mines = num_mines
+        self.max_steps = max_steps
         self.render_mode = render_mode
         self.reward_win = reward_win
         self.reward_lose = reward_lose
         self.reward_reveal = reward_reveal
-        self.reward_flag = reward_flag
+        self.reward_flag_toggle = reward_flag_toggle
+        self.reward_flag_right = reward_flag_right
+        self.reward_flag_wrong = reward_flag_wrong
         self.reward_invalid = reward_invalid
+        self.step_count = 0
 
         # 162 个离散动作: 81 个位置 × 2 种操作 (翻开 / 标旗)
         self.action_space = spaces.Discrete(width * height * 2)
@@ -43,21 +49,25 @@ class MinesweeperEnv(gym.Env):
         self.revealed = np.zeros((self.height, self.width), dtype=bool)
         self.flagged = np.zeros((self.height, self.width), dtype=bool)
         self.first_click = True
+        self.step_count = 0
         return self._get_obs(), {}
 
     def step(self, action):
+        self.step_count += 1
+        truncated = self.step_count >= self.max_steps
+
         action_type = action // (self.width * self.height)
         pos_action = action % (self.width * self.height)
         row, col = divmod(pos_action, self.width)
 
         if action_type == 1:
-            return self._handle_flag(row, col)
+            return self._handle_flag(row, col, truncated)
 
         # action_type == 0: 翻开
         if self.revealed[row, col]:
-            return self._get_obs(), self.reward_invalid, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, truncated, {}
         if self.flagged[row, col]:
-            return self._get_obs(), self.reward_invalid, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, truncated, {}
 
         if self.first_click:
             self._place_mines(safe_row=row, safe_col=col)
@@ -65,21 +75,34 @@ class MinesweeperEnv(gym.Env):
 
         if self.mine_grid[row, col] == -1:
             self.revealed[row, col] = True
-            return self._get_obs(), self.reward_lose, True, False, {}
+            return self._get_obs(), self.reward_lose, True, truncated, {}
 
         self._flood_fill(row, col)
 
         all_safe_revealed = np.all(self.revealed | (self.mine_grid == -1))
         if all_safe_revealed:
-            return self._get_obs(), self.reward_win, True, True, {}
+            return self._get_obs(), self.reward_win, True, truncated, {}
 
-        return self._get_obs(), self.reward_reveal, False, False, {}
+        return self._get_obs(), self.reward_reveal, False, truncated, {}
 
-    def _handle_flag(self, row, col):
+    def _handle_flag(self, row, col, truncated):
         if self.revealed[row, col]:
-            return self._get_obs(), self.reward_invalid, False, False, {}
-        self.flagged[row, col] = not self.flagged[row, col]
-        return self._get_obs(), self.reward_flag, False, False, {}
+            return self._get_obs(), self.reward_invalid, False, truncated, {}
+
+        toggling_on = not self.flagged[row, col]  # 即将插旗
+        self.flagged[row, col] = toggling_on
+
+        if self.first_click:
+            # 雷还没埋，不知道对不对，给 toggle reward
+            return self._get_obs(), self.reward_flag_toggle, False, truncated, {}
+
+        if toggling_on:
+            r = self.reward_flag_right if self.mine_grid[row, col] == -1 else self.reward_flag_wrong
+        else:
+            # 取消旗：撤销之前的奖励
+            r = self.reward_flag_wrong if self.mine_grid[row, col] == -1 else self.reward_flag_right
+
+        return self._get_obs(), r, False, truncated, {}
 
     # ---------- 核心逻辑 ----------
 
