@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn as nn
@@ -8,142 +9,144 @@ from ppo_network import ActorCritic
 
 
 # ============================================================
+#  Config
+# ============================================================
+
+@dataclass
+class PPOConfig:
+    lr: float = 1e-4
+    gamma: float = 0.99
+    lam: float = 0.95
+    clip_eps: float = 0.2
+    value_coef: float = 0.5
+    entropy_coef: float = 0.01
+    update_epochs: int = 4
+    steps_per_epoch: int = 256
+    num_epochs: int = 500
+
+
+# ============================================================
 #  GAE
 # ============================================================
 
-def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
+def compute_gae(rewards, values, dones, gamma, lam):
     T = len(rewards)
-    advantages = np.zeros(T, dtype=np.float32)
+    adv = np.zeros(T, dtype=np.float32)
     gae = 0.0
-
     for t in reversed(range(T)):
-        next_non_terminal = 1.0 - dones[t]
-        delta = rewards[t] + gamma * values[t + 1] * next_non_terminal - values[t]
-        gae = delta + gamma * lam * next_non_terminal * gae
-        advantages[t] = gae
-
-    returns = advantages + values[:-1]
-    return advantages, returns
+        nxt = 1.0 - dones[t]
+        delta = rewards[t] + gamma * values[t + 1] * nxt - values[t]
+        gae = delta + gamma * lam * nxt * gae
+        adv[t] = gae
+    return adv, adv + values[:-1]
 
 
 # ============================================================
-#  Rollout - 收集经验
+#  Rollout
 # ============================================================
 
-def rollout(env, policy, device, T=256):
-    states, actions, rewards, dones, old_log_probs, old_values = [], [], [], [], [], []
-    episode_rewards = []
-    ep_reward = 0.0
+def rollout(env, policy, device, n_steps):
+    states, actions, rewards, dones = [], [], [], []
+    log_probs, values = [], []
+    episode_rewards, ep_reward = [], 0.0
 
-    state, _ = env.reset()
-
-    for _ in range(T):
-        state_tensor = torch.tensor(state, dtype=torch.float32).to(device)
+    s, _ = env.reset()
+    for _ in range(n_steps):
+        t = torch.tensor(s, dtype=torch.float32, device=device)
         with torch.no_grad():
-            logits, value = policy(state_tensor)
+            logit, v = policy(t)
 
-        dist = Categorical(logits=logits)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
+        dist = Categorical(logits=logit)
+        a = dist.sample()
 
-        next_state, reward, terminated, truncated, _ = env.step(action.item())
-        done = terminated or truncated
+        ns, r, term, trunc, _ = env.step(a.item())
+        done = term or trunc
 
-        states.append(state)
-        actions.append(action.item())
-        rewards.append(reward)
+        states.append(s)
+        actions.append(a.item())
+        rewards.append(r)
         dones.append(done)
-        old_log_probs.append(log_prob.item())
-        old_values.append(value.item())
-        ep_reward += reward
+        log_probs.append(dist.log_prob(a).item())
+        values.append(v.item())
+        ep_reward += r
 
         if done:
             episode_rewards.append(ep_reward)
             ep_reward = 0.0
-            state, _ = env.reset()
+            s, _ = env.reset()
         else:
-            state = next_state
+            s = ns
 
-    # 最后一个状态的值，用于 GAE bootstrap
-    state_tensor = torch.tensor(state, dtype=torch.float32).to(device)
+    # bootstrap value
+    t = torch.tensor(s, dtype=torch.float32, device=device)
     with torch.no_grad():
-        _, next_value = policy(state_tensor)
-    old_values.append(next_value.item())
+        _, next_v = policy(t)
+    values.append(next_v.item())
 
-    return {
-        'states': torch.tensor(np.array(states), dtype=torch.float32).to(device),
-        'actions': torch.tensor(actions, dtype=torch.long).to(device),
-        'rewards': np.array(rewards, dtype=np.float32),
-        'dones': np.array(dones, dtype=np.float32),
-        'old_log_probs': torch.tensor(old_log_probs, dtype=torch.float32).to(device),
-        'old_values': np.array(old_values, dtype=np.float32),
-        'episode_rewards': episode_rewards,
-    }
+    return (
+        torch.tensor(np.array(states), dtype=torch.float32, device=device),
+        torch.tensor(actions, dtype=torch.long, device=device),
+        np.array(rewards, dtype=np.float32),
+        np.array(dones, dtype=np.float32),
+        torch.tensor(log_probs, dtype=torch.float32, device=device),
+        np.array(values, dtype=np.float32),
+        episode_rewards,
+    )
 
 
 # ============================================================
 #  PPO-Clip Update
 # ============================================================
 
-def ppo_update(policy, optimizer, batch, clip_eps=0.2, value_coef=0.5,
-               entropy_coef=0.01, epochs=4, device='cpu'):
-    states = batch['states']
-    actions = batch['actions']
-    old_log_probs = batch['old_log_probs']
+def ppo_update(policy, optimizer, cfg, states, actions, rewards, dones,
+               old_log_probs, values):
+    adv, ret = compute_gae(rewards, values, dones, cfg.gamma, cfg.lam)
+    adv_t = torch.tensor(adv, dtype=torch.float32, device=states.device)
+    ret_t = torch.tensor(ret, dtype=torch.float32, device=states.device)
+    adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
 
-    advantages, returns = compute_gae(
-        batch['rewards'], batch['old_values'], batch['dones']
-    )
-    advantages = torch.tensor(advantages, dtype=torch.float32).to(device)
-    returns = torch.tensor(returns, dtype=torch.float32).to(device)
-
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-
-    total_policy_loss = 0.0
-    total_value_loss = 0.0
-
-    for _ in range(epochs):
-        logits, values = policy(states)
+    p_loss = v_loss = 0.0
+    for _ in range(cfg.update_epochs):
+        logits, v_pred = policy(states)
         dist = Categorical(logits=logits)
-        new_log_probs = dist.log_prob(actions)
-        entropy = dist.entropy().mean()
+        new_lp = dist.log_prob(actions)
 
-        # PPO-Clip
-        ratio = torch.exp(new_log_probs - old_log_probs)
-        surr1 = ratio * advantages
-        surr2 = torch.clamp(ratio, 1 - clip_eps, 1 + clip_eps) * advantages
+        ratio = torch.exp(new_lp - old_log_probs)
+        surr1 = ratio * adv_t
+        surr2 = torch.clamp(ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps) * adv_t
         policy_loss = -torch.min(surr1, surr2).mean()
 
-        value_loss = nn.MSELoss()(values, returns)
-        loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
+        value_loss = nn.MSELoss()(v_pred, ret_t)
+        entropy = dist.entropy().mean()
+        loss = policy_loss + cfg.value_coef * value_loss - cfg.entropy_coef * entropy
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        total_policy_loss += policy_loss.item()
-        total_value_loss += value_loss.item()
+        p_loss += policy_loss.item()
+        v_loss += value_loss.item()
 
-    return total_policy_loss / epochs, total_value_loss / epochs
+    return p_loss / cfg.update_epochs, v_loss / cfg.update_epochs
 
 
 # ============================================================
-#  主训练循环
+#  Train
 # ============================================================
 
-def train(env, policy, optimizer, num_epochs=500, steps_per_epoch=256, device='cpu'):
-    for epoch in range(num_epochs):
-        batch = rollout(env, policy, device, T=steps_per_epoch)
-        p_loss, v_loss = ppo_update(policy, optimizer, batch, device=device)
+def train(env, policy, optimizer, cfg, device):
+    for epoch in range(cfg.num_epochs):
+        states, actions, rewards, dones, old_lp, values, ep_rewards = rollout(
+            env, policy, device, cfg.steps_per_epoch
+        )
+        p_loss, v_loss = ppo_update(
+            policy, optimizer, cfg, states, actions, rewards, dones, old_lp, values
+        )
 
         if epoch % 10 == 0:
-            ep_rewards = batch['episode_rewards']
-            avg_ep_reward = np.mean(ep_rewards) if ep_rewards else 0.0
-            num_eps = len(ep_rewards)
-            print(f"epoch {epoch:4d} | avg_ep_reward: {avg_ep_reward:8.2f} "
-                  f"| episodes: {num_eps:3d} | p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
-
-    return policy
+            avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
+            print(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
+                  f"| eps: {len(ep_rewards):3d} | p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
 
 
 # ============================================================
@@ -152,13 +155,13 @@ def train(env, policy, optimizer, num_epochs=500, steps_per_epoch=256, device='c
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"device: {device}")
+    cfg = PPOConfig()
 
     env = MinesweeperEnv()
     policy = ActorCritic().to(device)
-    optimizer = optim.Adam(policy.parameters(), lr=1e-4)
+    optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
 
-    policy = train(env, policy, optimizer, num_epochs=500, device=device)
+    train(env, policy, optimizer, cfg, device)
 
     torch.save(policy.state_dict(), "ppo_minesweeper.pth")
     print("saved ppo_minesweeper.pth")
