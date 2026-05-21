@@ -9,7 +9,7 @@ from ppo_network import ActorCritic
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="exp/ppo_minesweeper.pth")
+    parser.add_argument("--model", type=str, default="exp/test/checkpoint_final.pth")
     parser.add_argument("--games", type=int, default=100)
     parser.add_argument("--logdir", type=str, default="eval")
     args = parser.parse_args()

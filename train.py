@@ -37,11 +37,11 @@ class PPOConfig:
 
     # ---- 奖励 ----
     reward_win: float = 20.0
-    reward_lose: float = -10.0
+    reward_lose: float = -20.0
     reward_reveal: float = 1.0
-    reward_flag_toggle: float = 0.0
-    reward_flag_right: float = 0.5
-    reward_flag_wrong: float = -0.5
+    reward_flag_toggle: float = -0.02
+    reward_flag_right: float = 2 
+    reward_flag_wrong: float = -2
     reward_invalid: float = -0.1
 
     # ---- wandb ----
@@ -159,7 +159,18 @@ def ppo_update(policy, optimizer, cfg, states, actions, rewards, dones,
 #  Train
 # ============================================================
 
-def train(env, policy, optimizer, cfg, device):
+def train(env, policy, optimizer, cfg, device, exp_dir=None):
+    if exp_dir:
+        os.makedirs(exp_dir, exist_ok=True)
+        log_path = os.path.join(exp_dir, "train.log")
+        log_file = open(log_path, "w")
+
+    def log(msg):
+        print(msg)
+        if exp_dir:
+            log_file.write(msg + "\n")
+            log_file.flush()
+
     for epoch in range(cfg.num_epochs):
         states, actions, rewards, dones, old_lp, values, ep_rewards = rollout(
             env, policy, device, cfg.steps_per_epoch
@@ -181,9 +192,12 @@ def train(env, policy, optimizer, cfg, device):
             }, step=epoch)
 
         if epoch % 10 == 0:
-            print(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
-                  f"| wins: {wins} | eps: {len(ep_rewards):3d} "
-                  f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
+            log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
+                f"| wins: {wins} | eps: {len(ep_rewards):3d} "
+                f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
+
+    if exp_dir:
+        log_file.close()
 
 
 # ============================================================
@@ -207,6 +221,9 @@ if __name__ == "__main__":
     if cfg.use_wandb:
         wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
 
+    exp_dir = os.path.join("exp", cfg.wandb_name)
+    os.makedirs(exp_dir, exist_ok=True)
+
     env = MinesweeperEnv(
         width=cfg.board_size, height=cfg.board_size,
         num_mines=cfg.num_mines, max_steps=cfg.max_steps,
@@ -220,11 +237,12 @@ if __name__ == "__main__":
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
 
-    train(env, policy, optimizer, cfg, device)
+    train(env, policy, optimizer, cfg, device, exp_dir)
 
-    os.makedirs("exp", exist_ok=True)
-    torch.save(policy.state_dict(), "exp/ppo_minesweeper.pth")
-    print("saved exp/ppo_minesweeper.pth")
+    # 保存最终模型
+    final_path = os.path.join(exp_dir, "checkpoint_final.pth")
+    torch.save(policy.state_dict(), final_path)
+    print(f"saved {final_path}")
 
     if cfg.use_wandb:
         wandb.finish()

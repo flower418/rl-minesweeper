@@ -9,7 +9,7 @@ class MinesweeperEnv(gym.Env):
     def __init__(self, width=9, height=9, num_mines=10, max_steps=200,
                  render_mode=None,
                  reward_win=10.0, reward_lose=-10.0, reward_reveal=0.3,
-                 reward_flag_toggle=0.0, reward_flag_right=0.5,
+                 reward_flag_toggle=-0.02, reward_flag_right=0.5,
                  reward_flag_wrong=-0.5, reward_invalid=-0.5):
         super().__init__()
         self.width = width
@@ -102,7 +102,7 @@ class MinesweeperEnv(gym.Env):
             # 取消旗：撤销之前的奖励
             r = self.reward_flag_wrong if self.mine_grid[row, col] == -1 else self.reward_flag_right
 
-        return self._get_obs(), r, False, truncated, {}
+        return self._get_obs(), r + self.reward_flag_toggle, False, truncated, {}
 
     # ---------- 核心逻辑 ----------
 
