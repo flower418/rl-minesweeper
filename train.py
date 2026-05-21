@@ -158,7 +158,15 @@ def ppo_update(policy, optimizer, cfg, states, actions, rewards, dones,
 #  Train
 # ============================================================
 
-def train(env, policy, optimizer, cfg, device):
+def train(env, policy, optimizer, cfg, device, exp_dir=None):
+    os.makedirs(exp_dir, exist_ok=True)
+    log_file = open(os.path.join(exp_dir, "train.log"), "w")
+
+    def log(msg):
+        print(msg)
+        log_file.write(msg + "\n")
+        log_file.flush()
+
     for epoch in range(cfg.num_epochs):
         states, actions, rewards, dones, old_lp, values, ep_rewards = rollout(
             env, policy, device, cfg.steps_per_epoch
@@ -180,6 +188,8 @@ def train(env, policy, optimizer, cfg, device):
             log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
                 f"| eps: {len(ep_rewards):3d} "
                 f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
+
+    log_file.close()
 
 
 # ============================================================
