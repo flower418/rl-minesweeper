@@ -25,16 +25,18 @@ class ActorCritic(nn.Module):
         self.critic = nn.Linear(128, 1)
 
     def forward(self, x):
-        # x: (board_width, board_height)
-        x.unsqueeze(1) # 在第 1 维添加，因为 cnn 要求的维数：(batch, in_channels, width, height) (1, 9, 9)
+        # x: (H, W) unbatched or (B, H, W) batched
+        if x.dim() == 2:
+            x = x.unsqueeze(0)       # → (1, H, W)
+        x = x.unsqueeze(1)            # → (B, 1, H, W)
 
-        x = F.relu(self.conv1(x)) # (batch, 16, 9, 9)
-        x = F.relu(self.conv2(x)) # (batch, 32, 9, 9)
+        x = F.relu(self.conv1(x))     # → (B, 16, H, W)
+        x = F.relu(self.conv2(x))     # → (B, 32, H, W)
 
-        x.flatten(start_dim=1) # 从第一维开始 flatten, (batch, 32*9*9)
-        x = self.fc(x) # (batch, 128)
+        x = x.flatten(start_dim=1)    # → (B, 32*H*W)
+        x = F.relu(self.fc(x))        # → (B, 128)
 
-        actions = self.actor(x) # (batch, num_actions)
-        value = self.critic(x) # (batch, 1)
+        logits = self.actor(x)        # → (B, num_actions)
+        value = self.critic(x).squeeze(-1)  # → (B,)
 
         return logits, value
