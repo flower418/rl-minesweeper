@@ -38,7 +38,7 @@ class PPOConfig:
     # ---- 奖励 ----
     reward_win: float = 20.0
     reward_lose: float = -20.0
-    reward_reveal: float = 1.0
+    reward_reveal: float = 5.0
     reward_flag_toggle: float = -0.02
     reward_flag_right: float = 2 
     reward_flag_wrong: float = -2
@@ -169,21 +169,19 @@ def train(env, policy, optimizer, cfg, device):
         )
 
         avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
-        wins = sum(1 for r in ep_rewards if r > 0)
 
         if cfg.use_wandb:
             wandb.log({
                 "avg_reward": avg_r,
-                "wins": wins,
                 "episodes": len(ep_rewards),
                 "policy_loss": p_loss,
                 "value_loss": v_loss,
             }, step=epoch)
 
-        if epoch % 50 == 0:
-            print(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
-                  f"| wins: {wins} | eps: {len(ep_rewards):3d} "
-                  f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
+        if epoch % 10 == 0:
+            log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
+                f"| eps: {len(ep_rewards):3d} "
+                f"| p_loss: {p_loss:.4f} | v_loss: {v_loss:.4f}")
 
 
 # ============================================================
