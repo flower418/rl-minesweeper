@@ -45,7 +45,6 @@ class PPOConfig:
     reward_invalid: float = -1.0
 
     # ---- wandb ----
-    use_wandb: bool = True
     wandb_project: str = "rl-minesweeper"
     wandb_name: str = "Test1"
 
@@ -170,13 +169,12 @@ def train(env, policy, optimizer, cfg, device):
 
         avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
 
-        if cfg.use_wandb:
-            wandb.log({
-                "avg_reward": avg_r,
-                "episodes": len(ep_rewards),
-                "policy_loss": p_loss,
-                "value_loss": v_loss,
-            }, step=epoch)
+        wandb.log({
+            "avg_reward": avg_r,
+            "episodes": len(ep_rewards),
+            "policy_loss": p_loss,
+            "value_loss": v_loss,
+        }, step=epoch)
 
         if epoch % 10 == 0:
             log(f"epoch {epoch:4d} | avg_reward: {avg_r:8.2f} "
@@ -191,7 +189,6 @@ def train(env, policy, optimizer, cfg, device):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", type=str, default=None, help="wandb run name")
-    parser.add_argument("--no-wandb", action="store_true")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -199,11 +196,8 @@ if __name__ == "__main__":
 
     if args.name:
         cfg.wandb_name = args.name
-    if args.no_wandb:
-        cfg.use_wandb = False
 
-    if cfg.use_wandb:
-        wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
+    wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
 
     exp_dir = os.path.join("exp", cfg.wandb_name)
     os.makedirs(exp_dir, exist_ok=True)
@@ -227,5 +221,4 @@ if __name__ == "__main__":
     torch.save(policy.state_dict(), final_path)
     print(f"saved {final_path}")
 
-    if cfg.use_wandb:
-        wandb.finish()
+    wandb.finish()
