@@ -9,9 +9,9 @@ class MinesweeperEnv(gym.Env):
     def __init__(self, width=9, height=9, num_mines=10, max_steps=200,
                  render_mode=None,
                  reward_win=10.0, reward_lose=-10.0, reward_reveal=0.3,
-                 reward_flag_toggle=-0.02, reward_flag_right=0.5,
+                 reward_flag_right=0.5,
                  reward_flag_wrong=-0.5, reward_flag_retoggle=-2.0,
-                 reward_invalid=-0.5):
+                 ):
         super().__init__()
         self.width = width
         self.height = height
@@ -21,11 +21,9 @@ class MinesweeperEnv(gym.Env):
         self.reward_win = reward_win
         self.reward_lose = reward_lose
         self.reward_reveal = reward_reveal
-        self.reward_flag_toggle = reward_flag_toggle
         self.reward_flag_right = reward_flag_right
         self.reward_flag_wrong = reward_flag_wrong
         self.reward_flag_retoggle = reward_flag_retoggle
-        self.reward_invalid = reward_invalid
         self.step_count = 0
         self._last_flag_pos = None  # (row, col) of previous flag action
 
@@ -69,9 +67,9 @@ class MinesweeperEnv(gym.Env):
 
         # action_type == 0: 翻开
         if self.revealed[row, col]:
-            return self._get_obs(), self.reward_invalid, False, truncated, {}
+            return self._get_obs(), 0.0, False, truncated, {}
         if self.flagged[row, col]:
-            return self._get_obs(), self.reward_invalid, False, truncated, {}
+            return self._get_obs(), 0.0, False, truncated, {}
 
         if self.first_click:
             self._place_mines(safe_row=row, safe_col=col)
@@ -89,9 +87,18 @@ class MinesweeperEnv(gym.Env):
 
         return self._get_obs(), self.reward_reveal, False, truncated, {}
 
+    def action_mask(self):
+        mask = np.ones(self.width * self.height * 2, dtype=bool)
+        flat_revealed = self.revealed.reshape(-1)
+        flat_flagged = self.flagged.reshape(-1)
+        mask[: self.width * self.height] = ~(flat_revealed | flat_flagged)
+        mask[self.width * self.height :] = ~flat_revealed
+
+        return mask
+
     def _handle_flag(self, row, col, truncated):
         if self.revealed[row, col]:
-            return self._get_obs(), self.reward_invalid, False, truncated, {}
+            return self._get_obs(), 0.0, False, truncated, {}
 
         toggling_on = not self.flagged[row, col]
         self.flagged[row, col] = toggling_on
@@ -102,14 +109,14 @@ class MinesweeperEnv(gym.Env):
         self._last_flag_pos = (row, col)
 
         if self.first_click:
-            return self._get_obs(), self.reward_flag_toggle + extra, False, truncated, {}
+            return self._get_obs(), extra, False, truncated, {}
 
         if toggling_on:
             r = self.reward_flag_right if self.mine_grid[row, col] == -1 else self.reward_flag_wrong
         else:
             r = self.reward_flag_wrong if self.mine_grid[row, col] == -1 else self.reward_flag_right
 
-        return self._get_obs(), r + self.reward_flag_toggle + extra, False, truncated, {}
+        return self._get_obs(), r + extra, False, truncated, {}
 
     # ---------- 核心逻辑 ----------
 
