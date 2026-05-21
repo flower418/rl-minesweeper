@@ -9,6 +9,7 @@ from torch.distributions import Categorical
 
 import wandb
 
+from action_mask import apply_action_mask
 from minesweeper_env import MinesweeperEnv
 from ppo_network import ActorCritic
 
@@ -39,11 +40,9 @@ class PPOConfig:
     reward_win: float = 20.0
     reward_lose: float = -20.0
     reward_reveal: float = 5.0
-    reward_flag_toggle: float = -0.02
     reward_flag_right: float = 2
     reward_flag_wrong: float = -2
     reward_flag_retoggle: float = -2.0
-    reward_invalid: float = -1.0
 
     # ---- wandb ----
     wandb_project: str = "rl-minesweeper"
@@ -72,7 +71,7 @@ def compute_gae(rewards, values, dones, gamma, lam):
 
 def rollout(env, policy, device, n_steps):
     states, actions, rewards, dones = [], [], [], []
-    log_probs, values = [], []
+    log_probs, values, masks = [], [], []
     episode_rewards, ep_reward = [], 0.0
 
     s, _ = env.reset()
@@ -80,8 +79,10 @@ def rollout(env, policy, device, n_steps):
         t = torch.tensor(s, dtype=torch.float32, device=device)
         with torch.no_grad():
             logit, v = policy(t)
+            mask = torch.tensor(env.action_mask(), dtype=torch.bool, device=device)
+            masked_logits = apply_action_mask(logit, mask)
 
-        dist = Categorical(logits=logit)
+        dist = Categorical(logits=masked_logits)
         a = dist.sample()
 
         ns, r, term, trunc, _ = env.step(a.item())
@@ -93,6 +94,7 @@ def rollout(env, policy, device, n_steps):
         dones.append(done)
         log_probs.append(dist.log_prob(a).item())
         values.append(v.item())
+        masks.append(mask.cpu().numpy())
         ep_reward += r
 
         if done:
@@ -115,6 +117,7 @@ def rollout(env, policy, device, n_steps):
         np.array(dones, dtype=np.float32),
         torch.tensor(log_probs, dtype=torch.float32, device=device),
         np.array(values, dtype=np.float32),
+        np.array(masks, dtype=bool),
         episode_rewards,
     )
 
@@ -124,16 +127,18 @@ def rollout(env, policy, device, n_steps):
 # ============================================================
 
 def ppo_update(policy, optimizer, cfg, states, actions, rewards, dones,
-               old_log_probs, values):
+               old_log_probs, values, masks):
     adv, ret = compute_gae(rewards, values, dones, cfg.gamma, cfg.lam)
     adv_t = torch.tensor(adv, dtype=torch.float32, device=states.device)
     ret_t = torch.tensor(ret, dtype=torch.float32, device=states.device)
     adv_t = (adv_t - adv_t.mean()) / (adv_t.std() + 1e-8)
 
     p_loss = v_loss = 0.0
+    masks_t = torch.tensor(masks, dtype=torch.bool, device=states.device)
     for _ in range(cfg.update_epochs):
         logits, v_pred = policy(states)
-        dist = Categorical(logits=logits)
+        masked_logits = apply_action_mask(logits, masks_t)
+        dist = Categorical(logits=masked_logits)
         new_lp = dist.log_prob(actions)
 
         ratio = torch.exp(new_lp - old_log_probs)
@@ -169,11 +174,11 @@ def train(env, policy, optimizer, cfg, device, exp_dir=None):
         log_file.flush()
 
     for epoch in range(cfg.num_epochs):
-        states, actions, rewards, dones, old_lp, values, ep_rewards = rollout(
+        states, actions, rewards, dones, old_lp, values, masks, ep_rewards = rollout(
             env, policy, device, cfg.steps_per_epoch
         )
         p_loss, v_loss = ppo_update(
-            policy, optimizer, cfg, states, actions, rewards, dones, old_lp, values
+            policy, optimizer, cfg, states, actions, rewards, dones, old_lp, values, masks
         )
 
         avg_r = np.mean(ep_rewards) if ep_rewards else 0.0
@@ -218,11 +223,9 @@ if __name__ == "__main__":
         num_mines=cfg.num_mines, max_steps=cfg.max_steps,
         reward_win=cfg.reward_win, reward_lose=cfg.reward_lose,
         reward_reveal=cfg.reward_reveal,
-        reward_flag_toggle=cfg.reward_flag_toggle,
         reward_flag_right=cfg.reward_flag_right,
         reward_flag_wrong=cfg.reward_flag_wrong,
         reward_flag_retoggle=cfg.reward_flag_retoggle,
-        reward_invalid=cfg.reward_invalid,
     )
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
