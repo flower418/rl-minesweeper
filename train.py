@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import argparse
 import os
 import numpy as np
 import torch
@@ -18,6 +19,7 @@ from ppo_network import ActorCritic
 
 @dataclass
 class PPOConfig:
+    # ---- RL 超参 ----
     lr: float = 1e-4
     gamma: float = 0.99
     lam: float = 0.95
@@ -26,10 +28,26 @@ class PPOConfig:
     entropy_coef: float = 0.01
     update_epochs: int = 4
     steps_per_epoch: int = 256
-    num_epochs: int = 500
+    num_epochs: int = 1000
+
+    # ---- 环境 ----
+    board_size: int = 9
+    num_mines: int = 10
+    max_steps: int = 200
+
+    # ---- 奖励 ----
+    reward_win: float = 20.0
+    reward_lose: float = -10.0
+    reward_reveal: float = 1.0
+    reward_flag_toggle: float = 0.0
+    reward_flag_right: float = 0.5
+    reward_flag_wrong: float = -0.5
+    reward_invalid: float = -0.1
+
+    # ---- wandb ----
     use_wandb: bool = True
     wandb_project: str = "rl-minesweeper"
-    wandb_name: str = "ppo-baseline"
+    wandb_name: str = "test"
 
 
 # ============================================================
@@ -173,13 +191,32 @@ def train(env, policy, optimizer, cfg, device):
 # ============================================================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--name", type=str, default=None, help="wandb run name")
+    parser.add_argument("--no-wandb", action="store_true")
+    args = parser.parse_args()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cfg = PPOConfig()
+
+    if args.name:
+        cfg.wandb_name = args.name
+    if args.no_wandb:
+        cfg.use_wandb = False
 
     if cfg.use_wandb:
         wandb.init(project=cfg.wandb_project, name=cfg.wandb_name, config=cfg.__dict__)
 
-    env = MinesweeperEnv()
+    env = MinesweeperEnv(
+        width=cfg.board_size, height=cfg.board_size,
+        num_mines=cfg.num_mines, max_steps=cfg.max_steps,
+        reward_win=cfg.reward_win, reward_lose=cfg.reward_lose,
+        reward_reveal=cfg.reward_reveal,
+        reward_flag_toggle=cfg.reward_flag_toggle,
+        reward_flag_right=cfg.reward_flag_right,
+        reward_flag_wrong=cfg.reward_flag_wrong,
+        reward_invalid=cfg.reward_invalid,
+    )
     policy = ActorCritic().to(device)
     optimizer = optim.Adam(policy.parameters(), lr=cfg.lr)
 
